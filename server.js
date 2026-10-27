@@ -5,25 +5,37 @@ app.use(express.json());
 app.use(express.static("public"));
 
 const KEY = process.env.GEMINI_API_KEY;
-const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+const MODEL = process.env.GEMINI_MODEL || "gemini-3.8-flash";
 const cases = new Map(); // caseId -> full case (including secrets), kept server-side
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function gemini(prompt, json) {
   if (!KEY) throw new Error("GEMINI_API_KEY is not set");
-  const r = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "x-goog-api-key": KEY },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: json ? { responseMimeType: "application/json" } : {},
-      }),
+  const models = [...new Set([MODEL, "gemini-3.8-flash", "gemini-3.6-flash"])];
+  let lastStatus = 0;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const model = models[attempt % models.length]; // switch model between tries
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": KEY },
+        body: JSON.stringify({
+          contents: [{ role: "user", parts: [{ text: prompt }] }],
+          generationConfig: json ? { responseMimeType: "application/json" } : {},
+        }),
+      }
+    );
+    if (r.ok) {
+      const d = await r.json();
+      return d.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
     }
-  );
-  if (!r.ok) throw new Error("Gemini error " + r.status);
-  const d = await r.json();
-  return d.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") || "";
+    lastStatus = r.status;
+    if (![404, 429, 500, 502, 503, 504].includes(r.status)) break; // not worth retrying
+    await sleep(1500 * (attempt + 1));
+  }
+  throw new Error("Gemini is busy (error " + lastStatus + "). Please try again in a moment.");
 }
 
 app.post("/api/generate", async (req, res) => {
