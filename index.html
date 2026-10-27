@@ -1,0 +1,45 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Investigation Room</title>
+<style>
+:root{--bg:#f4f1ea;--card:#fffdf8;--ink:#1d1b18;--mute:#6b665d;--acc:#9a2f2f;--line:#d9d3c5}
+@media(prefers-color-scheme:dark){:root{--bg:#15171a;--card:#1f2226;--ink:#ece8df;--mute:#9a9587;--acc:#e0705f;--line:#33373d}}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Georgia,serif}
+main{max-width:860px;margin:0 auto;padding:20px 16px 48px}h1{margin:0}h2{font-size:1rem;text-transform:uppercase;letter-spacing:.06em;color:var(--acc);margin:0 0 8px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin:14px 0}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:8px 12px}
+button.p{background:var(--acc);color:#fff;border-color:var(--acc)}button:disabled{opacity:.5}
+.row{display:flex;gap:6px;flex-wrap:wrap}input{flex:1;font:inherit;padding:8px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);min-width:0}
+#log{max-height:280px;overflow-y:auto;border:1px solid var(--line);border-radius:8px;padding:10px;margin:8px 0;background:var(--bg)}
+.on{background:var(--ink);color:var(--bg)}.m{margin:0 0 8px}.m b{color:var(--acc)}.mute{color:var(--mute)}
+</style></head><body><main>
+<h1>🕵️ AI Investigation Room</h1>
+<p class="mute">Gemini writes a new mystery every time. Examine the evidence, grill the suspects, name the culprit.</p>
+<div class="card"><h2>New case</h2><div class="row"><input id="theme" placeholder="Theme (e.g. a luxury train, a space station)"><button class="p" id="gen">Generate mystery</button></div><p id="st" class="mute"></p></div>
+<div id="game" hidden>
+<div class="card"><h2 id="title"></h2><p id="sum"></p></div>
+<div class="card"><h2>Evidence</h2><ul id="ev"></ul></div>
+<div class="card"><h2>Interrogation</h2><div class="row" id="tabs"></div><div id="log"></div>
+<div class="row"><input id="q" placeholder="Ask a question…"><button class="p" id="ask">Ask</button></div></div>
+<div class="card"><h2>Accusation</h2><div class="row" id="acc"></div><p id="res"></p></div>
+</div></main>
+<script>
+const $=i=>document.getElementById(i);let C,cur=0,hist=[],done=false;
+async function post(u,b){const r=await fetch(u,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(b)});const d=await r.json();if(!r.ok)throw new Error(d.error||"Request failed");return d}
+$("gen").onclick=async()=>{$("gen").disabled=true;$("st").textContent="Generating case…";
+ try{C=await post("/api/generate",{theme:$("theme").value});hist=C.suspects.map(()=>[]);cur=0;done=false;$("res").textContent="";$("st").textContent="";$("game").hidden=false;draw()}
+ catch(e){$("st").textContent="Error: "+e.message}$("gen").disabled=false};
+function draw(){$("title").textContent=C.title;$("sum").textContent=C.setting+" "+C.summary;
+ $("ev").innerHTML="";C.evidence.forEach(e=>{const li=document.createElement("li");const b=document.createElement("b");b.textContent=e.title+": ";li.append(b,e.detail);$("ev").append(li)});
+ $("tabs").innerHTML="";C.suspects.forEach((s,i)=>{const b=document.createElement("button");b.className=i===cur?"on":"";b.textContent=s.name+" ("+s.role+")";b.title=s.bio;b.onclick=()=>{cur=i;draw()};$("tabs").append(b)});
+ $("log").innerHTML="";const intro=document.createElement("p");intro.className="m mute";intro.textContent=C.suspects[cur].bio;$("log").append(intro);
+ hist[cur].forEach(m=>{const p=document.createElement("p");p.className="m";const b=document.createElement("b");b.textContent=(m.role==="user"?"You":C.suspects[cur].name.split(" ")[0])+": ";p.append(b,m.text);$("log").append(p)});
+ $("log").scrollTop=1e9;$("acc").innerHTML="";C.suspects.forEach((s,i)=>{const b=document.createElement("button");b.textContent="Accuse "+s.name;b.disabled=done;b.onclick=()=>accuse(i);$("acc").append(b)})}
+$("ask").onclick=async()=>{const q=$("q").value.trim();if(!q||done)return;$("q").value="";const h=hist[cur];$("ask").disabled=true;
+ try{const {reply}=await post("/api/interrogate",{id:C.id,suspect:cur,history:h,question:q});h.push({role:"user",text:q},{role:"model",text:reply})}
+ catch(e){h.push({role:"user",text:q},{role:"model",text:"(no answer: "+e.message+")"})}
+ $("ask").disabled=false;draw()};
+$("q").onkeydown=e=>{if(e.key==="Enter")$("ask").click()};
+async function accuse(i){const r=await post("/api/accuse",{id:C.id,suspect:i});done=true;
+ $("res").textContent=(r.correct?"Correct! ":"Wrong. The culprit was "+r.culprit+". ")+r.solution;draw()}
+</script></body></html>
